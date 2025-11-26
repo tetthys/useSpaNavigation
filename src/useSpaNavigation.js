@@ -1,76 +1,45 @@
-// src/useSpaNavigation.js
-//
-// React Router 기반 SPA navigation hook.
-// - Expects response shape: { navigation?: { action, target?, resolvedUrl?, fallbackUrl? } }
-// - Provides isLoading + callApi wrapper.
-
-import { useState } from "react";
+import { useState, useCallback, useContext } from "react";
 import { useNavigate } from "react-router";
+import { SmartInputContext } from "@tetthys/smartinput";
 
-/**
- * useSpaNavigation
- * @param {Object} routeMap - map of route keys to actual paths, e.g. { home: "/", profile: "/me" }
- */
-export function useSpaNavigation(routeMap = {}) {
+export function useSpaNavigation(routeMap) {
   const navigate = useNavigate();
+  const { updateBootstrap } = useContext(SmartInputContext);
+
   const [isLoading, setIsLoading] = useState(false);
 
-  function handleNavigation(responseData) {
-    const navigation = responseData && responseData.navigation;
-    if (!navigation || !navigation.action || navigation.action === "none") {
-      return;
-    }
+  const callApi = useCallback(
+    async (fn) => {
+      setIsLoading(true);
+      try {
+        const response = await fn();
+        const data = response.data;
 
-    let url = navigation.resolvedUrl;
+        // SmartInput 초기 데이터 전달
+        if (data.smartinput || data.fields || data.ui || data.flash) {
+          updateBootstrap(data);
+        }
 
-    if (!url && navigation.target) {
-      url = routeMap[navigation.target] || navigation.target;
-    }
+        // navigation 처리
+        if (data.navigation) {
+          const nav = data.navigation;
 
-    if (!url && navigation.fallbackUrl) {
-      url = navigation.fallbackUrl;
-    }
+          if (nav.action === "back") {
+            navigate(-1);
+          } else if (nav.action === "redirect") {
+            const routeKey = nav.target;
+            const resolved = nav.resolvedUrl || routeMap[routeKey];
+            navigate(resolved);
+          }
+        }
 
-    if (!url) return;
+        return data;
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [navigate, updateBootstrap]
+  );
 
-    switch (navigation.action) {
-      case "redirect":
-        navigate(url);
-        break;
-      case "replace":
-        navigate(url, { replace: true });
-        break;
-      case "back":
-        navigate(-1);
-        break;
-      case "reload":
-        window.location.href = url;
-        break;
-      default:
-        break;
-    }
-  }
-
-  /**
-   * callApi
-   * - Wraps any async API call.
-   * - Expects fn to return a Promise of response (axios/fetch style).
-   */
-  async function callApi(fn) {
-    setIsLoading(true);
-    try {
-      const res = await fn();
-      // Support axios style (res.data) or plain object
-      const data = res && res.data ? res.data : res;
-      handleNavigation(data);
-      return data;
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
-  return {
-    isLoading,
-    callApi,
-  };
+  return { isLoading, callApi };
 }
